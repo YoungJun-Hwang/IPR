@@ -1,7 +1,7 @@
 import { mkdir, copyFile, readFile, writeFile } from 'node:fs/promises';
 const target = new URL('../dist/', import.meta.url);
 await mkdir(new URL('static/', target), { recursive: true });
-for (const file of ['style.css', 'app.js', 'scanner.js','seller-ui.js']) {
+for (const file of ['style.css', 'app.js', 'scanner.js','seller-ui.js','local-data.js','real-data-ui.js']) {
   await copyFile(new URL(`../app/static/${file}`, import.meta.url), new URL(`static/${file}`, target));
 }
 await copyFile(new URL('../netlify/browser/storage.js', import.meta.url), new URL('static/storage.js', target));
@@ -14,3 +14,5 @@ await writeFile(new URL('index.html', target), html);
 console.log('Built dist/: static workspace + browser-private review storage. Netlify bundles the analysis function separately.');
 
 await writeFile(new URL('static/netlify-mode.js', target), 'window.IPR_STATIC_DEMO = true;');
+
+await copyFile(new URL('../browser-capture/ipr-capture-extension.zip',import.meta.url),new URL('static/ipr-capture-extension.zip',target));

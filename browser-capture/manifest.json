@@ -1,0 +1,9 @@
+{
+  "manifest_version": 3,
+  "name": "IPR 실제 자료 수집",
+  "version": "0.1.0",
+  "description": "사용자가 열어둔 쿠팡 상품 화면의 공개 정보와 대표 이미지를 로컬 파일로 저장합니다.",
+  "permissions": ["activeTab", "scripting"],
+  "optional_host_permissions": ["https://*.coupangcdn.com/*"],
+  "action": { "default_popup": "popup.html" }
+}

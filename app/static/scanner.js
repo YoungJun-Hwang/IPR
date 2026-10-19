@@ -41,7 +41,7 @@
   }
   function render(data) {
     report=data;$('scan-results').hidden=false;
-    $('scan-source').textContent=data.demo?'SIMULATED REPORT · 실제 수집 없음':'CATALOG SCAN REPORT';
+    $('scan-source').textContent=data.demo?'SIMULATED REPORT · 실제 수집 없음':data.local?'IMPORTED DATA · 사용자 실제 자료 파일':'CATALOG SCAN REPORT';
     $('scan-stage').textContent=data.stage;
     $('scan-site').textContent=`${data.site_url} · 기준 ${data.threshold}점 · ${data.status==='failed'?'중단됨':data.status==='complete'?'처리 완료':'진행 중'}`;
     for(const field of ['discovered','checked','candidates','unverified'])$('stat-'+field).textContent=data.counts[field];
@@ -120,10 +120,10 @@
   };
   $('scan-export').onclick=()=> {
     if(!report)return;
-    const url=URL.createObjectURL(new Blob([JSON.stringify(report,null,2)],{type:'application/json;charset=utf-8'}));
+    const url=URL.createObjectURL(new Blob([JSON.stringify({schema:report.schema||'ipr.scan.v1',...report},null,2)],{type:'application/json;charset=utf-8'}));
     const link=el('a');link.href=url;link.download=`ipr-catalog-${report.id}.json`;link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
   };
   $('scan-hosting').hidden=!staticMode;
-  if(staticMode){$('scan-start').disabled=true;$('scan-start').textContent='실제 자동 점검은 서버에서 실행';}
+  if(staticMode){$('scan-start').disabled=true;$('scan-start').textContent='자동 수집은 위 GitHub 작업에서 실행';}
   recent();
 })();

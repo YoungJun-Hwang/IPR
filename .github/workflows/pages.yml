@@ -23,6 +23,10 @@ jobs:
           node --test tests/pages/*.test.mjs
           node --check app/static/scanner.js
           node --check app/static/seller-ui.js
+          node --check app/static/local-data.js
+          node --check app/static/real-data-ui.js
+          node --check browser-capture/popup.js
+          node --test tests/real_data/*.test.mjs
           node scripts/build-pages.mjs
       - uses: actions/configure-pages@v5
         with:

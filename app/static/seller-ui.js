@@ -79,15 +79,16 @@
     $('bulk-save').disabled=true;
     try {
       let result;
-      if(report.demo) {
+      if(report.demo||report.local) {
         result=structuredClone(report);
         for(const product of result.products)if(selected.has(product.url))product.review={...update,product_urls:undefined,source:'user',updated:new Date().toISOString()};
-        localStorage.setItem('ipr.seller-demo.v1:'+location.pathname,JSON.stringify(result));
+        if(report.local)await window.IPR_LOCAL_REPORTS.save(result);
+        else localStorage.setItem('ipr.seller-demo.v1:'+location.pathname,JSON.stringify(result));
       } else {
         const response=await fetch(`/api/scans/${report.id}/reviews`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(update)});
         result=await response.json();if(!response.ok)throw Error(typeof result.detail==='string'?result.detail:'저장에 실패했습니다.');
       }
-      window.IPR_SCANNER.render(result);$('bulk-message').textContent=report.demo?'샘플 검토 기록이 이 브라우저에 저장되었습니다.':'선택 상품의 검토 기록을 저장했습니다.';
+      window.IPR_SCANNER.render(result);$('bulk-message').textContent=report.demo?'샘플 검토 기록이 이 브라우저에 저장되었습니다.':report.local?'실제 파일의 검토 기록을 이 브라우저에 저장했습니다.':'선택 상품의 검토 기록을 저장했습니다.';
     } catch(error){$('bulk-message').textContent=error.message;}
     finally{$('bulk-save').disabled=false;}
   };
@@ -103,8 +104,8 @@
   $('confirmed-json').onclick=()=>{const data=bundle();if(!data.product_count){$('bulk-message').textContent='확인 완료로 기록한 상품이 없습니다.';return;}download(JSON.stringify(data,null,2),'application/json;charset=utf-8',`ipr-confirmed-${data.scan_id}.json`);};
   $('confirmed-csv').onclick=()=> {
     const data=bundle();if(!data.product_count){$('bulk-message').textContent='확인 완료로 기록한 상품이 없습니다.';return;}
-    const rows=[['자료 구분','판매자','사업자 유형','유형 근거','유형 출처','상품','카테고리','상품 URL','이미지 URL','동일 사진 다른 상품 URL','사진 묶음 ID','검토 상태','확인 내용','근거 URL','기록 일시']];
-    for(const group of data.sellers)for(const product of group.products)rows.push([data.demo?'가상 샘플':'수집 자료',group.seller.name,types[group.seller.business_type],group.seller.type_evidence,group.seller.evidence_url,product.name,product.category,product.url,(product.images||[]).map(image=>image.url).join('\n'),(product.duplicate_peers||[]).map(peer=>peer.product_url).join('\n'),(product.duplicate_groups||[]).join(', '),'사용자 확인 완료',product.review.notes,product.review.evidence_url,product.review.updated]);
+    const rows=[['자료 구분','판매자','사업자 유형','유형 근거','유형 출처','상품','카테고리','상품 URL','이미지 URL','동일 사진 다른 상품 URL','사진 묶음 ID','검토 상태','확인 내용','근거 URL','기록 일시','분류 출처']];
+    for(const group of data.sellers)for(const product of group.products)rows.push([data.demo?'가상 샘플':'수집 자료',group.seller.name,types[group.seller.business_type],group.seller.type_evidence,group.seller.evidence_url,product.name,product.category,product.url,(product.images||[]).map(image=>image.url).join('\n'),(product.duplicate_peers||[]).map(peer=>peer.product_url).join('\n'),(product.duplicate_groups||[]).join(', '),'사용자 확인 완료',product.review.notes,product.review.evidence_url,product.review.updated,group.seller.source||'공개 수집 정보']);
     const cell=value=>{let text=String(value??'');if(/^[=+\-@\t\r]/.test(text))text="'"+text;return '"'+text.replaceAll('"','""')+'"';};
     download('\ufeff'+rows.map(row=>row.map(cell).join(',')).join('\r\n'),'text/csv;charset=utf-8',`ipr-confirmed-${data.scan_id}.csv`);
   };

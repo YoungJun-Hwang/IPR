@@ -2,7 +2,7 @@ import {mkdir, readFile, writeFile, copyFile} from 'node:fs/promises';
 const root = new URL('../', import.meta.url);
 const target = new URL('docs/', root);
 await mkdir(new URL('static/', target), {recursive:true});
-for (const file of ['app.js','style.css','scanner.js','seller-ui.js']) await copyFile(new URL(`app/static/${file}`,root),new URL(`static/${file}`,target));
+for (const file of ['app.js','style.css','scanner.js','seller-ui.js','local-data.js','real-data-ui.js']) await copyFile(new URL(`app/static/${file}`,root),new URL(`static/${file}`,target));
 await copyFile(new URL('netlify/browser/storage.js',root),new URL('static/storage.js',target));
 await copyFile(new URL('pages/analyze.js',root),new URL('static/analyze.js',target));
 let html = await readFile(new URL('app/static/index.html',root),'utf8');
@@ -23,3 +23,5 @@ html = html.replace('원본 상품 설명이나 확인할 문구를 입력하세
 await writeFile(new URL('index.html',target),html);
 await writeFile(new URL('.nojekyll',target),'');
 console.log('Built docs/: standalone GitHub Pages demo, no dependencies or backend required.');
+
+await copyFile(new URL('browser-capture/ipr-capture-extension.zip',root),new URL('static/ipr-capture-extension.zip',target));

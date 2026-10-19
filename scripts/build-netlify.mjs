@@ -1,7 +1,7 @@
 import { mkdir, copyFile, readFile, writeFile } from 'node:fs/promises';
 const target = new URL('../dist/', import.meta.url);
 await mkdir(new URL('static/', target), { recursive: true });
-for (const file of ['style.css', 'app.js', 'scanner.js']) {
+for (const file of ['style.css', 'app.js', 'scanner.js','seller-ui.js']) {
   await copyFile(new URL(`../app/static/${file}`, import.meta.url), new URL(`static/${file}`, target));
 }
 await copyFile(new URL('../netlify/browser/storage.js', import.meta.url), new URL('static/storage.js', target));

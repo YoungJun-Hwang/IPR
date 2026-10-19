@@ -22,7 +22,9 @@ from xml.etree import ElementTree
 
 from bs4 import BeautifulSoup
 from PIL import Image, ImageOps, UnidentifiedImageError
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
+from typing import Literal
+from app import sellers
 
 Image.MAX_IMAGE_PIXELS = 16_000_000
 POOL = ThreadPoolExecutor(max_workers=2, thread_name_prefix='ipr-scan')
@@ -39,10 +41,18 @@ class Reference(BaseModel):
 
 class ScanInput(BaseModel):
     site_url: str = Field(max_length=2048)
-    references: list[Reference] = Field(min_length=1, max_length=3)
+    references: list[Reference] = Field(default_factory=list, max_length=3)
+    mode: Literal['reference','seller_duplicates'] = 'reference'
     max_products: int = Field(default=20, ge=1, le=50)
     max_categories: int = Field(default=5, ge=1, le=10)
     threshold: int = Field(default=88, ge=75, le=100)
+
+
+    @model_validator(mode='after')
+    def require_reference(self):
+        if self.mode == 'reference' and not self.references:
+            raise ValueError('기준 이미지 비교 모드에는 원본 이미지가 필요합니다.')
+        return self
 
 
 def connect(path):
@@ -109,10 +119,11 @@ def image_features(data):
     # Flat images produce unstable low-information matches; never flag them by pHash alone.
     average = sum(pixels)/len(pixels)
     informative = sum((value-average)**2 for value in pixels)/len(pixels) > 16
+    pixel_hash=hashlib.sha256(str(image.size).encode()+image.tobytes()).hexdigest()
     image.thumbnail((180,180))
     out = io.BytesIO()
     image.save(out, 'PNG')
-    return {'sha256':hashlib.sha256(data).hexdigest(), 'phash':phash, 'informative':informative,
+    return {'pixel_sha256':pixel_hash,'sha256':hashlib.sha256(data).hexdigest(), 'phash':phash, 'informative':informative,
             'thumbnail':'data:image/png;base64,'+base64.b64encode(out.getvalue()).decode()}
 
 
@@ -198,7 +209,9 @@ def product_data(html, base):
             for value in (raw if isinstance(raw,list) else [raw]):
                 source = value.get('url') or value.get('contentUrl') if isinstance(value,dict) else value
                 if isinstance(source,str):images.append(urljoin(base,source))
-    for tag in soup.select('meta[property="og:image"], img[src], img[data-src]'):
+    selector='' if images else ('meta[property="og:image"]' if soup.select('meta[property="og:image"]') else 'img[src], img[data-src]')
+    for tag in soup.select(selector) if selector else []:
+        if tag.find_parent(['header','nav','footer']):continue
         source=tag.get('content') or tag.get('data-src') or tag.get('src')
         if source and not source.startswith('data:'):
             images.append(urljoin(base,source))
@@ -220,11 +233,13 @@ def start_scan(path, body, fetcher):
             active=con.execute("SELECT COUNT(*) FROM scans WHERE json_extract(payload, '$.status') IN ('queued','running')").fetchone()[0]
         if active>=2:
             raise ValueError('동시에 2개까지만 점검할 수 있습니다. 진행 중인 점검이 끝난 뒤 다시 시작해 주세요.')
-        scan={'id':uuid.uuid4().hex,'created':datetime.now(timezone.utc).isoformat(),'site_url':body.site_url,'status':'queued',
+        scan={'mode':body.mode,'id':uuid.uuid4().hex,'created':datetime.now(timezone.utc).isoformat(),'site_url':body.site_url,'status':'queued',
               'stage':'점검 대기','threshold':body.threshold,'references':[{'name':r['name'],'thumbnail':r['thumbnail']} for r in references],
               'counts':{'discovered':0,'checked':0,'candidates':0,'unverified':0},'categories':[],'products':[],
               'warnings':['pHash 점수는 이미지 구조의 유사도이며 침해 확률이 아닙니다. 상표·캐릭터의 의미 인식, 디자인권 범위·판매 허가 확인은 수행하지 않습니다.',
                           f'최대 {body.max_categories}개 카테고리·{body.max_products}개 상품의 제한된 공개 HTML 표본입니다. 전체 쇼핑몰 점검을 보장하지 않습니다.']}
+        if body.mode=='seller_duplicates':
+            scan['warnings'].append('사진 재사용은 정식 유통·공급사 제공 사진에서도 발생합니다. 개인사업자 여부와 사진 중복은 위반 확률이나 위반 판정이 아닙니다. 판매자 신원이 확인된 서로 다른 판매자 사이의 동일 파일·동일 픽셀만 우선순위에 집계합니다.')
         put_scan(path,scan)
         POOL.submit(run_scan,path,scan['id'],body,references,fetcher)
     return scan
@@ -236,6 +251,7 @@ def run_scan(path,scan_id,body,references,fetcher,delay=0.35):
     origin=urlsplit(body.site_url).netloc.lower()
     robots=None
     budget=0
+    seller_cache={}
     def save(stage=None):
         if stage:scan['stage']=stage
         put_scan(path,scan)
@@ -323,18 +339,35 @@ def run_scan(path,scan_id,body,references,fetcher,delay=0.35):
             raise ValueError('지원되는 공개 상품 링크를 찾지 못했습니다. 동적·로그인 쇼핑몰은 전용 연동이 필요합니다.')
         for index,item in enumerate(targets):
             save(f"상품 이미지 점검 {index+1}/{len(targets)}")
-            product={'url':item['url'],'name':'상품','category':item['category'],'thumbnail':'','state':'unverified','score':None,'reference_name':'','reason':'','checked_images':0,'errors':[]}
+            product={'url':item['url'],'name':'상품','category':item['category'],'thumbnail':'','state':'unverified','score':None,'reference_name':'','reason':'','checked_images':0,'images':[],'review':{'status':'unreviewed','notes':'','evidence_url':''},'errors':[]}
             try:
                 data,_,final=fetch(item['url'])
                 if urlsplit(final).netloc.lower()!=origin:raise ValueError('다른 도메인으로 이동한 상품입니다.')
                 name,category,images=product_data(data,final)
                 product.update(name=name,category=category or item['category'])
+                seller=sellers.parse_seller(data,final)
+                seller_url=normalized_link(final,seller.get('url'),origin) if seller.get('url') else None
+                if seller_url and seller['business_type']=='unknown' and not seller.get('ambiguous'):
+                    try:
+                        if seller_url not in seller_cache:
+                            seller_html,_,seller_final=fetch(seller_url)
+                            if urlsplit(seller_final).netloc.lower()!=origin:raise ValueError('다른 도메인 판매자 정보')
+                            seller_cache[seller_url]=sellers.parse_seller(seller_html,seller_final,detail=True)
+                        detail=seller_cache[seller_url]
+                        # Preserve the product's stable seller identity and source URL.
+                        detail={**detail,'id':seller['id'],'url':seller_url,'identity_verified':seller['identity_verified']}
+                        if detail['name']=='판매자 확인 불가':detail['name']=seller['name']
+                        seller=detail
+                    except TimeoutError:raise
+                    except Exception:product['errors'].append('판매자 상세정보 수집 실패 · 사업자 유형 확인 불가')
+                product['seller']=seller
                 best=None
                 for image_url in images:
                     try:
                         raw,_,_=fetch(image_url,'image/')
                         features=image_features(raw)
                         product['checked_images']+=1
+                        product['images'].append({key:features[key] for key in ('sha256','pixel_sha256','informative')} | {'url':image_url})
                         if not product['thumbnail']:product['thumbnail']=features['thumbnail']
                         for reference in references:
                             score,reason=similarity(features,reference)
@@ -346,9 +379,9 @@ def run_scan(path,scan_id,body,references,fetcher,delay=0.35):
                     score,reason,ref_name,thumb,image_url=best
                     product.update(score=score,reference_name=ref_name,reason=reason,thumbnail=thumb,image_url=image_url,
                                    state='candidate' if score>=body.threshold else ('partial' if product['errors'] else 'below_threshold'))
-                elif product['checked_images']:
+                elif product['checked_images'] and body.mode=='reference':
                     product['errors'].append('이미지 특징이 부족해 유사도를 산정하지 못했습니다.')
-                else:product['errors'].append('비교 가능한 상품 이미지가 없습니다.')
+                elif not product['checked_images']:product['errors'].append('비교 가능한 상품 이미지가 없습니다.')
             except TimeoutError:raise
             except Exception as exc:
                 product['errors'].append(str(exc) if isinstance(exc,ValueError) else '상품 페이지 수집에 실패했습니다.')
@@ -361,6 +394,8 @@ def run_scan(path,scan_id,body,references,fetcher,delay=0.35):
     except Exception as exc:
         scan.update(status='failed',stage=str(exc) if isinstance(exc,(ValueError,TimeoutError)) else '네트워크 또는 이미지 처리 오류로 점검이 중단되었습니다.')
     finally:
+        if body.mode=='seller_duplicates':
+            sellers.summarize(scan)
         scan['request_count']=budget
-        scan['products'].sort(key=lambda item: (item['state']=='candidate',item['score'] if item['score'] is not None else -1),reverse=True)
+        if body.mode!='seller_duplicates':scan['products'].sort(key=lambda item: (item['state']=='candidate',item['score'] if item['score'] is not None else -1),reverse=True)
         save()

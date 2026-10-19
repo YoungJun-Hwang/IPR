@@ -10,7 +10,8 @@
   }
   function renderProducts() {
     const category=$('scan-category-filter').value, state=$('scan-state-filter').value;
-    const products=report.products.filter(p=>(!category||p.category===category)&&(state==='all'||(state==='unverified'?(['unverified','partial'].includes(p.state)||p.errors?.length):p.state==='candidate'))).sort((a,b)=>(b.score??-1)-(a.score??-1));
+    const sellerRanks=new Map((report.sellers||[]).map((seller,index)=>[seller.id,index]));
+    const products=report.products.filter(p=>(!window.IPR_SELLER_FILTER||window.IPR_SELLER_FILTER(p,report))&&(!category||p.category===category)&&(state==='all'||(state==='unverified'?(['unverified','partial'].includes(p.state)||p.errors?.length):p.state==='candidate'))).sort((a,b)=>report.mode==='seller_duplicates'?((sellerRanks.get(a.seller?.id)??1e6)-(sellerRanks.get(b.seller?.id)??1e6)||(b.duplicate_groups?.length||0)-(a.duplicate_groups?.length||0)):(b.score??-1)-(a.score??-1));
     $('scan-products').replaceChildren();
     for(const product of products) {
       const card=el('article',undefined,'card scan-product');
@@ -33,6 +34,7 @@
           }
         } catch {}
       }
+      if(window.IPR_DECORATE_PRODUCT)window.IPR_DECORATE_PRODUCT(card,product,report);
       $('scan-products').append(card);
     }
     if(!products.length)$('scan-products').append(el('div',report.status==='running'||report.status==='queued'?'상품을 수집·점검하는 중입니다.':'현재 필터에서 표시할 상품이 없습니다. 전체 상품과 미점검 목록도 확인해 주세요.','card empty'));
@@ -50,8 +52,10 @@
     for(const category of categories) {const option=el('option',category);option.value=category;$('scan-category-filter').append(option);}
     $('scan-category-filter').value=categories.includes(selected)?selected:'';
     $('scan-warnings').replaceChildren(...data.warnings.map(w=>el('li',w)));
+    if(window.IPR_RENDER_SELLERS)window.IPR_RENDER_SELLERS(data);
     renderProducts();
   }
+  window.IPR_SCANNER={getReport:()=>report,render,renderProducts};
   async function poll(id) {
     try {
       const data=await request(`/api/scans/${id}`);render(data);
@@ -91,16 +95,17 @@
     event.preventDefault();if(loading)return;
     $('scan-error').textContent='';
     if(staticMode){$('scan-error').textContent='현재 정적 웹사이트에서는 실제 쇼핑몰 수집을 실행할 수 없습니다. 자동 점검 샘플로 결과 화면을 확인하거나 Python 서버에서 실행해 주세요.';return;}
-    if(!files.length){$('scan-error').textContent='비교할 기준 이미지가 필요합니다.';return;}
+    if($('scan-mode').value==='reference'&&!files.length){$('scan-error').textContent='비교할 기준 이미지가 필요합니다.';return;}
     loading=true;$('scan-start').disabled=true;clearTimeout(timer);
     try {
-      const data=await request('/api/scans',{method:'POST',body:JSON.stringify({site_url:$('scan-url').value.trim(),references:files,max_products:Number($('scan-limit').value),max_categories:Number($('scan-categories').value),threshold:Number($('scan-threshold').value)})});
+      const data=await request('/api/scans',{method:'POST',body:JSON.stringify({site_url:$('scan-url').value.trim(),mode:$('scan-mode').value,references:$('scan-mode').value==='reference'?files:[],max_products:Number($('scan-limit').value),max_categories:Number($('scan-categories').value),threshold:Number($('scan-threshold').value)})});
       render(data);poll(data.id);
     } catch(error) {loading=false;$('scan-start').disabled=false;$('scan-error').textContent=error.message;}
   };
   $('scan-demo').onclick=()=> {
     if(loading){$('scan-error').textContent='실제 점검이 진행 중입니다. 완료된 후 샘플을 열어 주세요.';return;}
     clearTimeout(timer);
+    if($('scan-mode').value==='seller_duplicates'&&window.IPR_SELLER_DEMO){render(window.IPR_SELLER_DEMO());$('scan-results').scrollIntoView({behavior:'smooth'});return;}
     const products=[
       {name:'모노그램 캔버스 토트백',category:'가방',score:98.4,state:'candidate',reference_name:'기준 가방 디자인'},
       {name:'시그니처 패턴 숄더백',category:'가방',score:93.7,state:'candidate',reference_name:'기준 가방 디자인'},

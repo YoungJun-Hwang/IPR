@@ -21,6 +21,8 @@ jobs:
       - name: Test and build standalone demo
         run: |
           node --test tests/pages/*.test.mjs
+          node --check app/static/scanner.js
+          node --check app/static/seller-ui.js
           node scripts/build-pages.mjs
       - uses: actions/configure-pages@v5
         with:

@@ -349,3 +349,47 @@ def scan_status(scan_id: str):
     if scan is None:
         raise HTTPException(404, '점검 기록을 찾을 수 없습니다.')
     return scan
+
+
+class BatchReview(BaseModel):
+    product_urls: list[str] = Field(min_length=1,max_length=50)
+    status: str
+    notes: str = Field(default='',max_length=5000)
+    evidence_url: str = Field(default='',max_length=2048)
+
+
+@app.patch('/api/scans/{scan_id}/reviews')
+def review_scan_products(scan_id: str, body: BatchReview):
+    if body.status not in ('unreviewed','needs_review','confirmed','no_issue'):
+        raise HTTPException(422,'지원하지 않는 검토 상태입니다.')
+    if body.evidence_url:
+        try:
+            parts=urlsplit(body.evidence_url)
+            if parts.scheme not in ('http','https') or not parts.hostname or parts.username or parts.password:
+                raise ValueError()
+        except ValueError:
+            raise HTTPException(422,'인증 정보가 없는 http 또는 https 근거 URL을 입력해 주세요.')
+    if body.status=='confirmed' and (not body.notes.strip() or not body.evidence_url):
+        raise HTTPException(422,'확인 완료로 기록하려면 확인 내용과 근거 URL이 필요합니다.')
+    with catalog.connect(DB) as con:
+        con.execute('BEGIN IMMEDIATE')
+        row=con.execute('SELECT payload FROM scans WHERE id=?',(scan_id,)).fetchone()
+        if row is None:raise HTTPException(404,'점검 기록을 찾을 수 없습니다.')
+        scan=json.loads(row['payload'])
+        if scan['status'] in ('running','queued'):raise HTTPException(409,'점검 완료 또는 중단 후 검토 내용을 저장해 주세요.')
+        targets=set(body.product_urls)
+        if not targets.issubset({product['url'] for product in scan['products']}):
+            raise HTTPException(422,'이 점검에 포함되지 않은 상품이 있습니다.')
+        for product in scan['products']:
+            if product['url'] in targets:
+                product['review']={'status':body.status,'notes':body.notes,'evidence_url':body.evidence_url,
+                                   'updated':datetime.now(timezone.utc).isoformat(),'source':'user'}
+        con.execute('UPDATE scans SET payload=? WHERE id=?',(json.dumps(scan,ensure_ascii=False),scan_id))
+    return scan
+
+
+@app.get('/api/scans/{scan_id}/confirmed')
+def export_confirmed(scan_id: str):
+    scan=catalog.get_scan(DB,scan_id)
+    if scan is None:raise HTTPException(404,'점검 기록을 찾을 수 없습니다.')
+    return catalog.sellers.confirmed_bundle(scan)

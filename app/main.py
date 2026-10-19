@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+from contextlib import asynccontextmanager
 import binascii
 import hashlib
 import http.client
@@ -25,7 +26,16 @@ from pydantic import BaseModel, Field
 ROOT = Path(__file__).resolve().parent
 DB = Path(os.environ.get('IPR_DB_PATH', str(ROOT.parent / '.data' / 'reviews.sqlite3')))
 MAX_BYTES = 2 * 1024 * 1024
-app = FastAPI(title='IPR · 권리 검토 워크스페이스')
+from app import catalog
+
+
+@asynccontextmanager
+async def lifespan(application):
+    catalog.recover_scans(DB)
+    yield
+
+
+app = FastAPI(title='IPR · 권리 검토 워크스페이스', lifespan=lifespan)
 app.mount('/static', StaticFiles(directory=ROOT / 'static'), name='static')
 
 
@@ -317,3 +327,25 @@ def update_review(review_id: int, body: ReviewInput):
         if not cursor.rowcount:
             raise HTTPException(404, '검토 기록을 찾을 수 없습니다.')
     return review(review_id)
+
+
+# Long-running catalog scans are local Python worker jobs, not GitHub Pages functions.
+@app.post('/api/scans', status_code=202)
+def create_scan(body: catalog.ScanInput):
+    try:
+        return catalog.start_scan(DB, body, fetch_public)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
+
+
+@app.get('/api/scans')
+def scans():
+    return catalog.list_scans(DB)
+
+
+@app.get('/api/scans/{scan_id}')
+def scan_status(scan_id: str):
+    scan = catalog.get_scan(DB, scan_id)
+    if scan is None:
+        raise HTTPException(404, '점검 기록을 찾을 수 없습니다.')
+    return scan

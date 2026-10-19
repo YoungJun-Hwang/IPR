@@ -10,10 +10,11 @@ async function api(path, options = {}) {
   return value;
 }
 function view(name) {
-  for (const v of ['new', 'history', 'result']) $(v + '-view').hidden = v !== name;
-  $('new-nav').classList.toggle('active', name !== 'history');
+  for (const v of ['scan', 'new', 'history', 'result']) $(v + '-view').hidden = v !== name;
+  $('new-nav').classList.toggle('active', name === 'new' || name === 'result');
   $('history-nav').classList.toggle('active', name === 'history');
-  $('breadcrumb').textContent = ({new:'새 분석', history:'검토 기록', result:'분석 결과'})[name];
+  $('scan-nav').classList.toggle('active', name === 'scan');
+  $('breadcrumb').textContent = ({scan:'쇼핑몰 자동 점검', new:'개별 상품 비교', history:'검토 기록', result:'분석 결과'})[name];
   window.scrollTo(0, 0);
 }
 function el(tag, text, cls) {

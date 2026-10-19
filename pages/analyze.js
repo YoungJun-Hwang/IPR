@@ -1,4 +1,5 @@
 (() => {
+  window.IPR_STATIC_DEMO = true;
   const normalize = value => value.replace(/\s+/gu, ' ').trim().toLowerCase();
   window.IPR_ANALYZE_BROWSER = async body => {
     if (!body.brand?.trim() && !body.reference_text?.trim() && !body.reference_image) throw new Error('브랜드명, 권리 문구, 원본 이미지 중 하나 이상을 등록해 주세요.');

@@ -1,0 +1,12 @@
+__pycache__/
+.pytest_cache/
+.venv/
+.data/
+*.pyc
+node_modules/
+dist/
+.netlify/
+artifacts/
+.env
+.env.*
+!.env.example

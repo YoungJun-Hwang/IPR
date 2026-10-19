@@ -21,6 +21,10 @@ def run(config, output):
             if report['status'] not in ('running','queued'):break
             time.sleep(.5)
         report.update(schema='ipr.scan.v1',demo=False,execution='github_actions' if __import__('os').environ.get('GITHUB_ACTIONS')=='true' else 'local_cli')
+        import os
+        if os.environ.get('GITHUB_ACTIONS')=='true' and os.environ.get('IPR_PUBLIC_REPOSITORY')!='false':
+            report.update(products=[],sellers=[],duplicate_image_groups=[],references=[],privacy_redacted=True)
+            report['warnings'].append('공개 저장소의 Actions 산출물이므로 판매자·상품 원자료를 포함하지 않습니다. 실제 목록은 로컬 실행 또는 브라우저 수집 파일로 확인하세요.')
         output.parent.mkdir(parents=True,exist_ok=True)
         output.write_text(json.dumps(report,ensure_ascii=False,indent=2),encoding='utf-8')
         print(json.dumps({'status':report['status'],'stage':report['stage'],'counts':report['counts']},ensure_ascii=False))
@@ -35,4 +39,12 @@ if __name__=='__main__':
     config=json.loads(Path(args.config).read_text(encoding='utf-8'))
     # Mode is fixed so workflow inputs cannot request a different or unbounded task.
     config.pop('mode',None)
-    raise SystemExit(run(config,Path(args.output)))
+    try:
+        code=run(config,Path(args.output))
+    except (ValueError,TypeError) as error:
+        import uuid
+        from datetime import datetime,timezone
+        failure={'schema':'ipr.scan.v1','id':uuid.uuid4().hex,'created':datetime.now(timezone.utc).isoformat(),'site_url':config.get('site_url',''),'mode':'seller_duplicates','demo':False,'status':'failed','stage':'입력 검증 실패: '+str(error),'counts':{'discovered':0,'checked':0,'candidates':0,'unverified':0},'products':[],'warnings':[]}
+        destination=Path(args.output);destination.parent.mkdir(parents=True,exist_ok=True);destination.write_text(json.dumps(failure,ensure_ascii=False),encoding='utf-8')
+        code=2
+    raise SystemExit(code)

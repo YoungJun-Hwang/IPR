@@ -2,7 +2,7 @@ name: Run real seller scan
 on:
   push:
     branches: [main]
-    paths: [requests/coupang.json]
+    paths: [requests/coupang.json, .github/workflows/real-scan.yml]
   workflow_dispatch:
     inputs:
       site_url:
@@ -43,8 +43,25 @@ jobs:
           Path('requests/coupang.json').write_text(json.dumps(data),encoding='utf-8')
           PY
       - name: Run actual collection (no sample fallback)
+        env:
+          IPR_PUBLIC_REPOSITORY: ${{ !github.event.repository.private }}
         run: python scripts/run-real-scan.py
-      - name: Retain actual outcome for download (not public Pages)
+      - name: Summarize actual outcome without publishing seller data
+        if: always()
+        run: |
+          python - <<'PY'
+          import os,json,html
+          from pathlib import Path
+          path=Path('artifacts/real-scan.json')
+          if path.exists():
+              report=json.loads(path.read_text())
+              summary={key:report.get(key) for key in ('status','stage','counts')}
+          else:
+              summary={'status':'failed','stage':'No report was produced; inspect dependency or runner errors.'}
+          with open(os.environ['GITHUB_STEP_SUMMARY'],'a') as out:
+              out.write('<h2>Actual scan outcome</h2><pre>'+html.escape(json.dumps(summary,ensure_ascii=False,indent=2))+'</pre>')
+          PY
+      - name: Retain outcome (raw products only for private repos)
         if: always()
         uses: actions/upload-artifact@v4
         with:
